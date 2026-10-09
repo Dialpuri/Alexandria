@@ -344,6 +344,32 @@ def set_author_trail_sort(order):
     save(data)
 
 
+def get_bibtex_live_path():
+    """Path of the `.bib` file kept in step with the library, or ''
+    when the feature is off (the default).
+
+    One path, not one per catalogue: it names a file belonging to
+    something outside Alexandria — a paper being written — and which
+    catalogue the citations came from is not a property of that paper.
+
+    Set in ~/.config/Alexandria/config.json as e.g.
+        "bibtex_live_path": "/home/paule/thesis/refs.bib"
+    """
+    stored = load().get("bibtex_live_path")
+    return stored.strip() if isinstance(stored, str) else ""
+
+
+def set_bibtex_live_path(path):
+    """Persist the live `.bib` path (or clear it when given falsy,
+    which turns the feature off)."""
+    data = load()
+    if path and path.strip():
+        data["bibtex_live_path"] = path.strip()
+    else:
+        data.pop("bibtex_live_path", None)
+    save(data)
+
+
 def get_contact_email(path=None):
     """The user's own contact address for polite-pool API access, or
     '' when unset.

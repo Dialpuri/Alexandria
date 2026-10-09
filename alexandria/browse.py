@@ -47,7 +47,8 @@ from . import (index, edit_dialog, importer, metrics, sidecar, extract,
                funding, gtr, gestures,
                shortcuts as shortcuts_help,
                viewer, marks_config, prefs, watcher as watcher_mod,
-               author_works, bibtex_import, bibtex_export, ris_export,
+               author_works, bibtex_import, bibtex_export, bibtex_live,
+               ris_export,
                csl_export, opener, references_pdf, discover, csl_format,
                feed, feed_window, import_toast, pdb_mentions,
                funding_links, doi_import_dialog, jats, theme,
@@ -2293,6 +2294,25 @@ class BrowserWindow(Adw.ApplicationWindow):
         threading.Thread(target=self._pdb_mentions_backfill,
                          daemon=True).start()
 
+        # Live BibTeX export. A poll rather than a callback from the
+        # import paths: papers arrive down half a dozen routes (the
+        # importer, BibTeX import, ghosts from Discover, the watcher
+        # seeing a sidecar appear, the edit dialog) and all of them
+        # already go through `index.upsert`, which bumps
+        # `index.CHANGE_SERIAL`. Watching one integer catches the lot
+        # and cannot be forgotten by the next route added.
+        #
+        # Two seconds: fast enough that the `.bib` is written before
+        # anyone switches to a terminal and runs LaTeX, slow enough
+        # that a folder import of 500 PDFs coalesces into a handful of
+        # rewrites rather than 500. The tick costs an integer compare
+        # when nothing has changed, which is almost always.
+        self._bib_live_serial = index.CHANGE_SERIAL
+        self._bib_live_busy = False
+        self._bib_live_last_error = None
+        self._bib_live_timer_id = GLib.timeout_add_seconds(
+            2, self._bib_live_tick)
+
         # GFileMonitor-based library watcher: react to external file
         # changes in LIBRARY_ROOT (drops via Files / cp / sync tools,
         # plus sidecar rewrites from `alexandria-import --refresh`).
@@ -3157,6 +3177,81 @@ class BrowserWindow(Adw.ApplicationWindow):
         if skipped:
             msg += " ({} skipped — sidecar missing)".format(skipped)
         self._toast(msg)
+
+    # --- Live BibTeX export ---------------------------------------------
+    #
+    # The `.bib` the user's LaTeX document cites, kept in step with
+    # the library so they never have to remember to re-export. See
+    # `bibtex_live` for what gets written and why it is a rewrite
+    # rather than an append.
+
+    def _bib_live_tick(self):
+        """Has the library changed since the last live export? Rewrite
+        if so. Scheduled every 2 s from the constructor; returns True
+        to stay scheduled."""
+        if not bibtex_live.get_path():
+            # Off. Keep the serial current so that turning it on
+            # doesn't look like "everything changed" — Preferences
+            # asks for the first write explicitly.
+            self._bib_live_serial = index.CHANGE_SERIAL
+            return True
+        if self._bib_live_busy:
+            # A big library takes a moment to render; let it finish.
+            # Whatever changed meanwhile moves the serial again and
+            # is picked up on a later tick.
+            return True
+        serial = index.CHANGE_SERIAL
+        if serial == self._bib_live_serial:
+            return True
+        self._bib_live_serial = serial
+        self._start_bib_live_sync()
+        return True
+
+    def _start_bib_live_sync(self):
+        """Render and write the live `.bib` on a worker thread. Reads
+        every sidecar in the library, so not on the GTK thread."""
+        self._bib_live_busy = True
+        threading.Thread(target=self._do_bib_live_sync,
+                         daemon=True).start()
+
+    def _do_bib_live_sync(self):
+        # Own connection: sqlite3 objects belong to the thread that
+        # made them, same as the refreshers above.
+        conn = None
+        try:
+            conn = index.connect_existing(self._db_path)
+            result = bibtex_live.sync(conn)
+        except Exception as e:
+            GLib.idle_add(self._on_bib_live_failed,
+                          "{}{}".format(e, _sqlite_err_info(e)))
+        else:
+            GLib.idle_add(self._on_bib_live_done, result)
+        finally:
+            if conn is not None:
+                conn.close()
+
+    def _on_bib_live_done(self, result):
+        self._bib_live_busy = False
+        self._bib_live_last_error = None
+        if result and result[3]:
+            path, written, skipped, _changed = result
+            _wlog("bibtex-live", "wrote {} entries to {}{}".format(
+                written, path,
+                " ({} skipped — sidecar missing)".format(skipped)
+                if skipped else ""))
+        return False
+
+    def _on_bib_live_failed(self, message):
+        self._bib_live_busy = False
+        _wlog("bibtex-live", "failed: " + message)
+        # A path that has gone away — an unmounted share, a deleted
+        # project folder — fails on every tick. Say it once per
+        # distinct message rather than every two seconds.
+        if message != self._bib_live_last_error:
+            self._bib_live_last_error = message
+            self._toast("Live BibTeX export failed: " + message,
+                        timeout=6)
+        return False
 
     # --- Export RIS (mirror of BibTeX export) ---------------------------
 
@@ -5052,6 +5147,12 @@ class BrowserWindow(Adw.ApplicationWindow):
         except Exception:
             pass
         try:
+            if self._bib_live_timer_id:
+                GLib.source_remove(self._bib_live_timer_id)
+                self._bib_live_timer_id = None
+        except Exception:
+            pass
+        try:
             self.library_watcher.stop()
         except Exception:
             pass
@@ -6384,6 +6485,119 @@ class BrowserWindow(Adw.ApplicationWindow):
             row.add_prefix(dot)
             marks_group.add(row)
             mark_entries[color] = row
+
+        # ── Live BibTeX ──────────────────────────────────────────────
+        bib_group = Adw.PreferencesGroup()
+        bib_group.set_title("Live BibTeX")
+        bib_group.set_description(
+            "Keep a .bib file in step with your library, so a LaTeX "
+            "document can cite straight from it without an export "
+            "first. Alexandria rewrites the whole file whenever a "
+            "paper is added, edited or removed — so anything you type "
+            "into it yourself will be lost.")
+        page.add(bib_group)
+
+        bib_row = Adw.ActionRow()
+        bib_row.set_title("BibTeX file")
+        bib_row.set_subtitle_selectable(True)
+
+        def _show_bib_path():
+            path = bibtex_live.get_path()
+            bib_row.set_subtitle(path or "Off — no file chosen")
+
+        _show_bib_path()
+
+        bib_clear_btn = Gtk.Button(label="Turn off")
+        bib_clear_btn.set_valign(Gtk.Align.CENTER)
+        bib_clear_btn.add_css_class("flat")
+        bib_clear_btn.set_visible(bool(bibtex_live.get_path()))
+        bib_choose_btn = Gtk.Button(label="Choose…")
+        bib_choose_btn.set_valign(Gtk.Align.CENTER)
+        bib_choose_btn.add_css_class("flat")
+        bib_row.add_suffix(bib_clear_btn)
+        bib_row.add_suffix(bib_choose_btn)
+        bib_row.set_activatable_widget(bib_choose_btn)
+        bib_group.add(bib_row)
+
+        def _adopt_bib_path(path):
+            bibtex_live.set_path(path)
+            _show_bib_path()
+            bib_clear_btn.set_visible(True)
+            # Write it now rather than at the next import: the point
+            # of choosing the file is to have a usable bibliography,
+            # and an empty one until the next paper arrives would look
+            # like the setting had not taken.
+            self._start_bib_live_sync()
+
+        def _on_bib_file_chosen(fd, result):
+            try:
+                f = fd.save_finish(result)
+            except GLib.Error:
+                return
+            if f is None:
+                return
+            path = f.get_path()
+            if not path:
+                return
+            if not path.lower().endswith(".bib"):
+                path += ".bib"
+            if bibtex_live.is_foreign(path):
+                # Somebody's hand-written bibliography. The first
+                # sync would destroy it, so make that a decision
+                # rather than a surprise.
+                confirm = Adw.AlertDialog()
+                confirm.set_heading("Overwrite this file?")
+                confirm.set_body(
+                    "{} already has BibTeX in it that Alexandria did "
+                    "not write. Choosing it means that content is "
+                    "replaced by your library, now and every time the "
+                    "library changes.".format(os.path.basename(path)))
+                confirm.add_response("cancel", "Cancel")
+                confirm.add_response("overwrite", "Overwrite")
+                confirm.set_response_appearance(
+                    "overwrite", Adw.ResponseAppearance.DESTRUCTIVE)
+                confirm.set_default_response("cancel")
+                confirm.set_close_response("cancel")
+                confirm.connect(
+                    "response",
+                    lambda _d, resp: (_adopt_bib_path(path)
+                                      if resp == "overwrite" else None))
+                confirm.present(dlg)
+                return
+            _adopt_bib_path(path)
+
+        def _on_choose_bib(_b):
+            fd = Gtk.FileDialog()
+            fd.set_title("Choose BibTeX file to keep up to date")
+            current = bibtex_live.get_path()
+            if current:
+                fd.set_initial_name(os.path.basename(current))
+                folder = os.path.dirname(current)
+                if folder and os.path.isdir(folder):
+                    fd.set_initial_folder(Gio.File.new_for_path(folder))
+            else:
+                fd.set_initial_name("library.bib")
+            bib_filter = Gtk.FileFilter()
+            bib_filter.set_name("BibTeX (*.bib)")
+            bib_filter.add_pattern("*.bib")
+            filters = Gio.ListStore.new(Gtk.FileFilter)
+            filters.append(bib_filter)
+            fd.set_filters(filters)
+            fd.set_default_filter(bib_filter)
+            # `save`, not `open`: the usual case is naming a .bib
+            # that does not exist yet, next to a .tex that does.
+            fd.save(self, None, _on_bib_file_chosen)
+
+        def _on_clear_bib(_b):
+            # The file itself stays — it is in the user's project and
+            # their LaTeX may still be citing it. We only stop
+            # rewriting it.
+            bibtex_live.set_path("")
+            _show_bib_path()
+            bib_clear_btn.set_visible(False)
+
+        bib_choose_btn.connect("clicked", _on_choose_bib)
+        bib_clear_btn.connect("clicked", _on_clear_bib)
 
         # ── Annotations ─────────────────────────────────────────────
         ann_group = Adw.PreferencesGroup()

@@ -18,6 +18,30 @@ XDG_STATE = os.environ.get("XDG_STATE_HOME") or os.path.join(
     os.path.expanduser("~"), ".local", "state")
 
 
+# Bumped by every write that changes which papers are in the library
+# or what they say. `bibtex_live` polls it from the browser window and
+# rewrites the live .bib when it has moved.
+#
+# An in-process integer rather than a column: it only ever has to be
+# compared against its own previous value within one run, and every
+# route a paper takes into the library — import, BibTeX import, the
+# watcher noticing a sidecar another copy of Alexandria wrote, the
+# edit dialog, enrichment — ends in `upsert` or `remove`, so bumping
+# here catches all of them without each caller remembering to.
+#
+# Incremented from worker threads and read from the GTK main thread.
+# No lock: `+= 1` on a module global is not atomic in principle, but
+# the only consumer asks "is this different from the number I saw
+# last time", and a lost increment under a race is corrected by the
+# next one.
+CHANGE_SERIAL = 0
+
+
+def _bump_change_serial():
+    global CHANGE_SERIAL
+    CHANGE_SERIAL += 1
+
+
 def _stable_host_id():
     """Return a string that identifies this machine and is stable
     across reboots, network changes, OS updates, and DHCP lease
@@ -1949,6 +1973,7 @@ def upsert(conn, pdf_path, sidecar_path, thumb_path, record, sidecar_mtime):
           is_oa_int, oa_status_v,
           funders_json, grants_json))
     conn.commit()
+    _bump_change_serial()
 
 
 def stale_citation_rows(conn, max_age_days=30, limit=None):
@@ -2198,6 +2223,7 @@ def all_pdf_paths(conn):
 def remove(conn, pdf_path):
     conn.execute("DELETE FROM papers WHERE pdf_path=?", (pdf_path,))
     conn.commit()
+    _bump_change_serial()
 
 
 def id_for_pdf_path(conn, pdf_path):

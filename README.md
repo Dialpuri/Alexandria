@@ -200,6 +200,13 @@ by editing the file, and the file is the same file. The library root
 can be overridden for one run with the `ALEXANDRIA_LIBRARY`
 environment variable.
 
+**`bibtex_live_path`** is absent until you set it, and names a `.bib`
+file Alexandria keeps in step with the library — see
+[Writing a paper](#writing-a-paper). Set it in
+**Preferences → Live BibTeX**, or by hand:
+
+    "bibtex_live_path": "/home/you/thesis/refs.bib"
+
 ### If you installed the Flatpak
 
 The sandbox redirects the XDG directories, so nothing is where the
@@ -243,6 +250,22 @@ no PDF. Those are *ghost* cards: press **Get PDF** and Alexandria
 tries OpenAlex, Unpaywall and EuropePMC in turn, and on success merges
 the download into the entry. Dropping a PDF straight onto a ghost
 card's thumbnail does the same thing.
+
+### Writing a paper
+
+**Preferences → Live BibTeX** points Alexandria at the `.bib` your
+LaTeX document cites, and keeps it there — every import, edit and
+deletion rewrites the file, so `\cite{}` works without an export
+first. Alexandria owns the file: it rewrites the whole thing rather
+than appending, so a correction you make in the Edit dialog reaches
+an entry already written and a duplicate citation key can't creep in.
+Anything you type into the file yourself is lost on the next change,
+and choosing a `.bib` that already has content in it asks first.
+
+The file is only written when something actually changed, so
+`latexmk -pvc` won't rebuild in a loop. For a one-off snapshot
+instead, **Import ▸ Export BibTeX…** still writes whatever the
+current search and mark filter have on screen.
 
 ### Reading
 

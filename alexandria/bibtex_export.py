@@ -162,11 +162,20 @@ def records_to_text(records):
     return bibtex.write(deduped)
 
 
-def export_rows_to_file(rows, output_path):
-    """Write a `.bib` file from a list of index rows. Each row must
-    expose `pdf_path` and `sidecar_path` (sqlite3.Row works). The
-    sidecar — the canonical store — is read for each row. Returns
-    `(written, skipped)`."""
+def rows_to_text(rows):
+    """Render index rows to a `.bib` string, returning
+    `(text, written, skipped)`.
+
+    Each row must expose `pdf_path` and `sidecar_path` (sqlite3.Row
+    works). The sidecar — the canonical store — is read for each row;
+    a row whose sidecar is missing or unreadable is skipped rather
+    than guessed at from the index cache.
+
+    Split out of `export_rows_to_file` for `bibtex_live`, which needs
+    the same text but writes it a different way (atomically, with a
+    header, on a timer). Two renderers would eventually disagree, and
+    the file the user cites from is the wrong place to find that
+    out."""
     records = []
     skipped = 0
     for row in rows:
@@ -189,7 +198,15 @@ def export_rows_to_file(rows, output_path):
             pdf_path = None
         records.append(sidecar_to_bibtex_record(rec, pdf_path))
 
-    text = records_to_text(records)
+    return records_to_text(records), len(records), skipped
+
+
+def export_rows_to_file(rows, output_path):
+    """Write a `.bib` file from a list of index rows. Each row must
+    expose `pdf_path` and `sidecar_path` (sqlite3.Row works). The
+    sidecar — the canonical store — is read for each row. Returns
+    `(written, skipped)`."""
+    text, written, skipped = rows_to_text(rows)
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(text)
-    return len(records), skipped
+    return written, skipped
