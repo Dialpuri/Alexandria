@@ -1296,6 +1296,16 @@ def make_card(row, parent_window, conn, on_saved, mark_labels=None,
     title.set_halign(Gtk.Align.START)
     title.set_wrap(True)
     title.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+    # WORD_CHAR lets Pango break *inside* a word when it can't fit,
+    # and Pango then inserts a hyphen at the break by default. On a
+    # filename-derived title that invents punctuation the file never
+    # had: "04_WatsonCrick_DNA_Structure_1953" wrapped as
+    # "04_WatsonCrick_D-" / "NA_Structure_1953", which reads as a
+    # hyphen in the title rather than a line break. Titles are data,
+    # so never add characters to them.
+    _no_hyphens = Pango.AttrList()
+    _no_hyphens.insert(Pango.attr_insert_hyphens_new(False))
+    title.set_attributes(_no_hyphens)
     title.set_max_width_chars(80)
     title.set_selectable(True)
     title.set_hexpand(True)
@@ -1395,24 +1405,30 @@ def make_card(row, parent_window, conn, on_saved, mark_labels=None,
         pass
     if "..." in auth_text:
         suffix = "  ({} authors)  ▾".format(n_authors)
-    auth_btn = Gtk.Button()
-    auth_btn.add_css_class("flat")
-    auth_btn.add_css_class("alexandria-author-link")
-    auth_btn.set_halign(Gtk.Align.START)
-    auth_btn.set_has_frame(False)
-    auth_btn.set_tooltip_text("Click for full author list and actions")
-    auth_inner = Gtk.Label()
-    auth_inner.set_markup(
-        "<small><span underline='single'>{}</span>{}</small>".format(
-            GLib.markup_escape_text(auth_text),
-            GLib.markup_escape_text(suffix)))
-    auth_inner.set_halign(Gtk.Align.START)
-    auth_inner.set_ellipsize(Pango.EllipsizeMode.END)
-    auth_inner.set_max_width_chars(80)
-    auth_btn.set_child(auth_inner)
-    auth_btn.connect("clicked",
-                     lambda b: parent_window._open_authors_popover(b, row))
-    text.append(auth_btn)
+    # With no authors at all (extraction found nothing, or the PDF
+    # was never enriched) `auth_text` is empty and this row collapses
+    # to a lone "▾" that opens an empty popover. Skip just the button
+    # — the rest of the card (year, journal, rating, PDB links) still
+    # has to be built, so this is a guard, not an early return.
+    if auth_text.strip():
+        auth_btn = Gtk.Button()
+        auth_btn.add_css_class("flat")
+        auth_btn.add_css_class("alexandria-author-link")
+        auth_btn.set_halign(Gtk.Align.START)
+        auth_btn.set_has_frame(False)
+        auth_btn.set_tooltip_text("Click for full author list and actions")
+        auth_inner = Gtk.Label()
+        auth_inner.set_markup(
+            "<small><span underline='single'>{}</span>{}</small>".format(
+                GLib.markup_escape_text(auth_text),
+                GLib.markup_escape_text(suffix)))
+        auth_inner.set_halign(Gtk.Align.START)
+        auth_inner.set_ellipsize(Pango.EllipsizeMode.END)
+        auth_inner.set_max_width_chars(80)
+        auth_btn.set_child(auth_inner)
+        auth_btn.connect("clicked",
+                         lambda b: parent_window._open_authors_popover(b, row))
+        text.append(auth_btn)
 
     yj_bits = []
     if row["year"]:
