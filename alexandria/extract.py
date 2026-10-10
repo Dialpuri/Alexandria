@@ -1100,6 +1100,63 @@ def looks_like_pii_title(title):
     return bool(s) and _PII_RE.fullmatch(s) is not None
 
 
+_ARTEFACT_EXTS = (
+    ".indd", ".qxd", ".qxp", ".pmd", ".p65", ".fm", ".doc", ".docx",
+    ".rtf", ".wpd", ".pub", ".cdr", ".tex", ".eps", ".ai", ".xps",
+    ".pdf",
+)
+
+# A typesetter's page marker left in the title slot: "jm6c00865 1..15",
+# "manuscript 1..11". The "N..M" shape is distinctive enough to match
+# on its own — no real paper title ends that way.
+_PAGE_MARKER_RE = re.compile(r"\s+\d+\s*\.\.\s*\d+\s*$")
+
+# Placeholders some producers write verbatim.
+_PLACEHOLDER_TITLES = frozenset(
+    ("manuscript", "untitled", "untitled document", "document",
+     "article", "paper", "microsoft word", "no job name"))
+
+
+def looks_like_production_artefact_title(title):
+    """Whether a "title" is really a leftover from making the PDF.
+
+    A PDF's /Title (and its XMP `dc:title`) is written by whatever
+    laid the page out, and for scanned back-catalogue and typeset
+    proofs that is routinely a production artefact rather than the
+    paper's name. Three shapes turn up:
+
+      * the layout file — `171-4356indd.indd` (Watson & Crick,
+        Nature 1953), `Microsoft Word - draft.doc`;
+      * a typesetter's page marker — `jm6c00865 1..15`,
+        `manuscript 1..11` (4 of 19 PDFs in one real library);
+      * a bare placeholder — `manuscript`, `untitled`.
+
+    These only ever reach the card when there is no DOI to enrich
+    from, because OpenAlex's title overwrites them otherwise. That
+    is exactly the scanned-paper case, where the card has least to
+    show and can least afford a line of gibberish. Rejecting the
+    artefact lets the page-1 scrape run, and failing that the
+    filename stem — both strictly better guesses than the name of
+    someone's InDesign file."""
+    if not title:
+        return False
+    s = " ".join(str(title).split())
+    low = s.lower()
+    if low in _PLACEHOLDER_TITLES:
+        return True
+    if low.startswith("microsoft word - "):
+        return True
+    if _PAGE_MARKER_RE.search(s):
+        return True
+    # A filename shape: one token, no spaces, ending in a layout /
+    # office extension. The no-space test keeps a genuine title that
+    # merely ends in ".ai" or ".doc" (rare, but possible in a paper
+    # about file formats) from being thrown away.
+    if " " not in s and low.endswith(_ARTEFACT_EXTS):
+        return True
+    return False
+
+
 def drop_pii_artefacts(result, pdf_path=None):
     """Remove the two things an Elsevier re-export asserts falsely.
 
@@ -1287,6 +1344,12 @@ def _enrich(result, pdf_path, on_progress=None):
     # Last-resort: scrape page 1 if we still have no title — but skip
     # for SI documents because the cover page describes the parent
     # paper and the heuristic scraper routinely clips it badly.
+    # Drop a production artefact before the scrape below, not after:
+    # nulling it here gives `_scrape_first_page` its chance to find
+    # the real title on page 1. (Doing it in `drop_pii_artefacts`,
+    # which runs last, would leave the card with nothing instead.)
+    if looks_like_production_artefact_title(result.get("title")):
+        result["title"] = None
     if not is_si and (
             not result.get("title") or not result.get("authors")):
         t, a = _scrape_first_page(pdf_path)
