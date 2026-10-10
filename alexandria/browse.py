@@ -2304,10 +2304,13 @@ class BrowserWindow(Adw.ApplicationWindow):
         #
         # Two seconds: fast enough that the `.bib` is written before
         # anyone switches to a terminal and runs LaTeX, slow enough
-        # that a folder import of 500 PDFs coalesces into a handful of
-        # rewrites rather than 500. The tick costs an integer compare
-        # when nothing has changed, which is almost always.
+        # that a folder import of 500 PDFs coalesces into one rewrite
+        # rather than 500 — see `_bib_live_tick` for how, and why it
+        # waits for the library to settle rather than acting on every
+        # change. The tick costs an integer compare when nothing has
+        # changed, which is almost always.
         self._bib_live_serial = index.CHANGE_SERIAL
+        self._bib_live_seen = index.CHANGE_SERIAL
         self._bib_live_busy = False
         self._bib_live_last_error = None
         self._bib_live_timer_id = GLib.timeout_add_seconds(
@@ -3186,21 +3189,55 @@ class BrowserWindow(Adw.ApplicationWindow):
     # rather than an append.
 
     def _bib_live_tick(self):
-        """Has the library changed since the last live export? Rewrite
-        if so. Scheduled every 2 s from the constructor; returns True
-        to stay scheduled."""
+        """Has the library settled somewhere new since the last live
+        export? Rewrite if so. Scheduled every 2 s from the
+        constructor; returns True to stay scheduled.
+
+        Settled, not merely changed. A render reads every sidecar in
+        the library (`bibtex_export.rows_to_text`), so firing on each
+        change during a bulk import would mean one full-library render
+        every two seconds for the length of the import, each competing
+        with the import threads for the GIL and the SQLite lock —
+        which is what `reload_policy` exists to prevent, and it
+        measured a 4.7 s freeze with only 33 papers in the library. It
+        would also defeat the point of the mtime guard in
+        `bibtex_live.sync`: mid-import the text genuinely differs each
+        time, so every render writes, and `latexmk -pvc` rebuilds
+        continuously until the import ends.
+
+        So two brakes, both inside the tick rather than hooked into
+        the import paths: skip while an import is running, and
+        otherwise require the serial to have held still for a whole
+        tick. Nothing has to be remembered by the next import route
+        somebody adds — which is the argument for the serial in the
+        first place. `_import_busy` is cleared in two places
+        (`_end_progress` and `_do_import_bib_done`), and hooking
+        either one would have missed the other."""
+        serial = index.CHANGE_SERIAL
         if not bibtex_live.get_path():
             # Off. Keep the serial current so that turning it on
             # doesn't look like "everything changed" — Preferences
             # asks for the first write explicitly.
-            self._bib_live_serial = index.CHANGE_SERIAL
+            self._bib_live_serial = serial
+            self._bib_live_seen = serial
             return True
         if self._bib_live_busy:
             # A big library takes a moment to render; let it finish.
             # Whatever changed meanwhile moves the serial again and
             # is picked up on a later tick.
             return True
-        serial = index.CHANGE_SERIAL
+        if getattr(self, "_import_busy", False):
+            # Mid-import. Follow the serial without acting on it, so
+            # that the first quiet tick afterwards writes once.
+            self._bib_live_seen = serial
+            return True
+        if serial != getattr(self, "_bib_live_seen", serial):
+            # Still moving — a multi-file drop, or an import that does
+            # not go through the progress bar. Let it stop first and
+            # write the result once.
+            self._bib_live_seen = serial
+            return True
+        self._bib_live_seen = serial
         if serial == self._bib_live_serial:
             return True
         self._bib_live_serial = serial
