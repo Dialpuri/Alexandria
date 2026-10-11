@@ -1,24 +1,22 @@
-# Inbox 1 — ideas from another machine
+# INBOX
 
-Append here freely; one idea per bullet, however rough. Nothing in
-this file is expected to be measured, checked against the code, or
-written well.
+Backlog entries written but not yet filed into `BACKLOG.md`. Each block
+below notes where it belongs. Move them across and delete from here once
+merged — this file is a staging area, not a second backlog.
 
-**This is an inbox, not a second backlog.** On penelope the entries
-get triaged: checked against what the code already does, measured
-where a number would change the decision, folded into `BACKLOG.md`
-under the right section, and then removed from here. An idea that
-turns out to be already done, or not worth doing, is recorded as
-such in `BACKLOG.md` rather than silently dropped.
+Only this machine writes to it; that is the point. `BACKLOG.md` is a
+single large file appended to from two machines, so routing one side's
+additions through a file with a single writer keeps them from
+conflicting.
 
-Why a separate file: `BACKLOG.md` took 21 commits in one week, and
-two machines appending to the same 2,000-line document is a merge
-conflict every time. Two files never conflict.
-
-Numbered rather than named after a machine, so a third computer can
-add `INBOX-other-2.md` without anyone renaming anything. Which
-machine wrote which inbox does not matter to the triage; only that
-it is not this one.
+*Empty as of 2026-10-11. The one entry, "arXiv: no interface worth the
+name" (noted 2026-10-09), was filed under `## Discovery` with two
+changes: the "All"-view grouping it listed as a blocker is already
+solved for the 27 bioRxiv subjects (`_PER_GROUP_CAP`, not
+`_ALL_VIEW_CAP`, governs that view), so the blocker became a note about
+`discovered` row volume instead; and the feed's own
+`<skipDays>Saturday, Sunday</skipDays>` was added, measured by fetching
+`q-bio.BM` on a Sunday and getting a valid channel with no items.*
 
 ---
 

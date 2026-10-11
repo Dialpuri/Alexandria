@@ -2876,6 +2876,105 @@ stops working the moment it is false.
   at least distrust an ORCID record whose `works_count` is in single
   figures.
 
+- **arXiv: there is no interface to it worth the name.** Noted
+  2026-10-09 on the other machine, filed 2026-10-11; measuring agrees
+  with the complaint.
+
+  What exists today is recognition, not access. `10.48550/` is in the
+  preprint-DOI prefix lists (`browse.py:125`, `metrics.py:2097`),
+  `author_works.py:242` gives it a venue chip, `classify.py:15` spots
+  `arXiv:NNNN.NNNNN` in text, and `extract.py:818` already maps a bare
+  arXiv ID to `10.48550/arxiv.<id>`. So we can *label* an arXiv paper
+  that arrives by some other route. There is **no arXiv client at
+  all** — no `export.arxiv.org`, no `api/query`, nowhere in the tree.
+
+  The Discover "Preprints" tab is Europe PMC only, and
+  `europepmc.PUBLISHERS` is `("bioRxiv", "medRxiv")` (`europepmc.py:43`)
+  — arXiv is not even in the dropdown. Going around the dropdown does
+  not help: Europe PMC holds 7,866 arXiv records against arXiv's ~2.5
+  million, and the phrase "electron microscopy model building" returns
+  0 preprint hits there. For anything physics-, maths- or CS-flavoured
+  we are blind, which is precisely the audience the project said it was
+  widening to (see the audience-shift note).
+
+  **The search API is not the way in.** Tested repeatedly on
+  2026-10-09: `export.arxiv.org/api/query` returned 429 "Rate
+  exceeded" on every attempt, with a correct descriptive User-Agent,
+  and then stopped answering altogether (curl exit 000) while
+  `arxiv.org/abs/` and the RSS host kept serving 200s from the same
+  machine a second later. It did work earlier in the project from the
+  other machine, so this is rate limiting or IP reputation rather than
+  a permanent block — but it means any design that needs the search
+  API on a user's keystroke is fragile by construction, and will fail
+  worst for the user on a shared institutional address.
+
+  **RSS is the way in, and it is the shape we already ship.** arXiv's
+  per-category feeds (`https://rss.arxiv.org/rss/<category>`, e.g.
+  `q-bio.BM`) answer 200 and carry title, `dc:creator` authors, the
+  `abs` link, category, `pubDate` and the whole abstract (1,100-1,900
+  chars in the sample). That is the same bargain as the bioRxiv
+  subject collections shipped in `4c73d0e`: no query, but records
+  complete enough to fill a `discovered` row with no enrichment call.
+  Three things make it a smaller job than it looks:
+
+    * **The DOI is already derivable.** The `abs` link ends in the
+      arXiv ID and `extract.py:818` turns that into
+      `10.48550/arxiv.<id>` today, so the `UNIQUE(subscription_id,
+      doi)` dedupe works unchanged.
+    * **One subscription row per category**, exactly as decided for
+      bioRxiv subjects — which also gets cross-listings right, see
+      below. `index.add_subscription` takes a new `arxiv_category`
+      kind beside `biorxiv_subject` and `retraction_watch`
+      (`index.py:1609`).
+    * The `[J]`/`[T]` kind glyph in `feed_window.py:49` needs one more
+      arm, or arXiv shares bioRxiv's.
+
+  **`arxiv:announce_type` has to be read — this is the one real
+  difference from bioRxiv.** Each item is `new`, `replace` or `cross`.
+  Measured 2026-10-09:
+
+        q-bio.BM         6 items   new=2    replace=3   cross=1
+        physics.bio-ph   9 items   new=3    replace=2   cross=3
+        cond-mat.soft   14 items   new=6    replace=2   cross=3
+        math.NA         50 items   new=23   replace=19  cross=4
+        cs.LG          472 items   new=178  replace=92  cross=146
+
+  `replace` re-announces a paper already seen — often half the feed —
+  so without filtering the feed keeps resurfacing old work. `cross` is
+  a cross-listing, and the bioRxiv ruling applies unchanged: a paper
+  showing up in different sections is fine, cross-listing is
+  information. So filter `replace`, keep `cross`.
+
+  **Volume varies by two orders of magnitude between categories, but
+  the UI for that is already built.** `q-bio.BM` announces 6 items;
+  `cs.LG` announces 472 in the same cycle. This was filed as a blocker
+  — settle the "All" view's grouping and its 100-row cap before arXiv
+  lands — but it was settled for the 27 bioRxiv subjects:
+  `_ALL_VIEW_CAP = 100` applies only to the single-subscription view,
+  and the All view is grouped per subscription with
+  `_PER_GROUP_CAP = 8`, where `feed_window.py:761` documents exactly
+  this burying problem and why grouping replaced the flat union. So
+  `cs.LG` beside `q-bio.BM` shows eight cards each and a "more" line.
+  What is *not* settled is the storage side: 472 rows per announcement
+  for a busy category, which is a `discovered` prune question rather
+  than a layout one.
+
+  **The feed is weekday-only and says so in the channel.** Fetched
+  2026-10-11, a Sunday: `rss.arxiv.org/rss/q-bio.BM` answers 200 with
+  a valid channel, zero items, and
+
+        <skipDays><day>Sunday</day><day>Saturday</day></skipDays>
+
+  So read `skipDays` rather than hard-coding the cadence, and do not
+  log an empty feed as a failure or let it mark a subscription dead —
+  at a weekend that is the correct answer. arXiv announces once per
+  weekday and the feed holds one cycle, so a missed announcement is
+  missed for good. With `FEED_FETCH_INTERVAL_HOURS = 6` that takes
+  Alexandria being closed for a whole day; a week away costs five
+  announcements. The catch-up route, if one is wanted, is arXiv's
+  listing pages or OAI-PMH — a separate question, and not a reason to
+  delay the feed.
+
 ## Sharing
 
 - **Share the annotations, not the sidecar.** Asked for 2026-09-13,
