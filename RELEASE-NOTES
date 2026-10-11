@@ -1,10 +1,60 @@
+  Release Notes for 0.8.1
+
+ o FEATURE: Live BibTeX export. Point Preferences -> Live BibTeX at
+            the .bib file your LaTeX document cites, and Alexandria
+            rewrites it whenever the library changes, so \cite{}
+            works without remembering to export first. The whole file
+            is rewritten rather than appended to, so a correction
+            made in the Edit dialog reaches an entry already written.
+            It is left alone when its contents would not change, so
+            latexmk -pvc does not rebuild in a loop, and it is
+            replaced in one step, so LaTeX never reads half a file.
+            A file you have since edited by hand is not overwritten:
+            it says so, and asks you to choose it again if you meant
+            to replace it. Contributed by Jordan Dialpuri.
+
+ o FEATURE: Follow arXiv categories. Add... -> arXiv, and tick as
+            many of the 155 categories as you read, grouped by
+            archive. Each keeps its own feed, and a paper
+            cross-listed into two categories appears under both,
+            because that is information rather than a duplicate.
+            Revised versions of papers already announced are left
+            out, which is about half of a typical category. arXiv
+            announces once each weekday, so nothing arrives at a
+            weekend. Rows come complete from the feed - title,
+            authors, abstract, DOI and date - with no further
+            lookups.
+
+ o BUG-FIX: Clicking an author sometimes did nothing. An optional
+            cache write part way through building the page could
+            fail, and then everything after it - the histogram, the
+            affiliations, the whole profile pane - never ran. It
+            looked like the window failing to open, with the reason
+            visible only in the terminal.
+
+ o BUG-FIX: A paper with no authors offered a menu button that
+            opened an empty list. The button is left out instead.
+
+ o BUG-FIX: A PDF's own title is written by whatever laid the page
+            out, and for scans and typeset proofs it is often a
+            production artefact rather than the name of the paper.
+            Watson and Crick (Nature, 1953) asserts
+            "171-4356indd.indd", and 4 of 19 PDFs in a real library
+            carried a typesetter's page marker such as
+            "jm6c00865 1..15". These are now rejected before the
+            first page is scraped, so a paper with no DOI gets a
+            chance at its real title rather than showing a line of
+            gibberish on the card.
+
+-----
+
   Release Notes for 0.8.0
 
  o FEATURE: Paper summaries are rendered properly. A summary is
             written in Markdown, and until now it was shown through a
             handful of regular expressions that knew bold, italic,
             code and little else, so nested lists, quotations, tables
-            and code blocks were not correctly interpetted. They are
+            and code blocks were not correctly interpreted. They are
             now parsed as CommonMark.
 
  o FEATURE: The OpenAlex API key can be set in Preferences.

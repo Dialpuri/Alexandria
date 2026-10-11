@@ -73,6 +73,30 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.8.1" date="2026-10-11">
+      <url type="details">https://github.com/pemsley/Alexandria/blob/main/RELEASE-NOTES</url>
+      <description>
+        <p>
+          A bibliography that keeps itself up to date, and arXiv in
+          the feed.
+        </p>
+        <ul>
+          <li>Live BibTeX: point Preferences at the .bib your LaTeX
+            document cites and Alexandria rewrites it whenever the
+            library changes, so citing needs no export first</li>
+          <li>Follow arXiv categories, all 155 of them grouped by
+            archive, beside the bioRxiv subject collections</li>
+          <li>Clicking an author could fail to open the window, when
+            an optional cache write part way through building the
+            page raised and took the rest of the page with it</li>
+          <li>A long title broken inside a word gained a hyphen it
+            never had, and a paper with no authors offered a menu
+            that opened an empty list</li>
+          <li>A PDF asserting a typesetter's filename as its title
+            no longer shows that on the card</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.8.0" date="2026-10-04">
       <url type="details">https://github.com/pemsley/Alexandria/blob/main/RELEASE-NOTES</url>
       <description>
