@@ -39,6 +39,15 @@ import os
 from . import bibtex_export, index, prefs
 
 
+class Foreign(OSError):
+    """The live file holds something Alexandria did not write.
+
+    An OSError rather than a type of its own: every caller of `sync`
+    already has to handle the file being unwritable, and refusing to
+    write is the same kind of news. `str()` of it is written to be
+    read by the user, since it reaches them as a toast."""
+
+
 # First line of every file written here. Matched as a prefix, so the
 # wording after it can change without un-adopting everyone's file.
 MARKER = "% Written by Alexandria"
@@ -97,18 +106,38 @@ def render(conn):
     return _HEADER + text, written, skipped
 
 
-def sync(conn, path=None):
+def sync(conn, path=None, allow_foreign=False):
     """Rewrite the live `.bib` if it needs it.
 
     Returns None when the feature is off, and otherwise
     `(path, written, skipped, changed)` — `changed` False meaning the
     file on disk already said exactly this and was left alone.
 
-    Raises OSError if the file cannot be written; the caller decides
-    how loudly to say so."""
+    Raises OSError if the file cannot be written, and `Foreign` — a
+    kind of OSError — when the file has stopped being ours since it
+    was adopted. The caller decides how loudly to say so.
+
+    `allow_foreign` is the consent the Preferences dialog has just
+    taken: at the moment a hand-written `.bib` is adopted it is still
+    foreign, and that first write is the one the user said yes to."""
     path = path or get_path()
     if not path:
         return None
+
+    # Asked again on every write, not only when the file was chosen.
+    # A `.bib` adopted months ago and since rewritten by hand — or
+    # replaced by a different project's bibliography, or by a `git
+    # checkout` — would otherwise be destroyed by whatever import
+    # happened next, silently, because the question had been asked
+    # and answered about a file that is no longer there.
+    if not allow_foreign and is_foreign(path):
+        # One argument, so `str()` is the sentence and nothing else:
+        # a two-argument OSError renders as "[Errno 1] ...: '/path'",
+        # and this one is read by the user in a toast.
+        raise Foreign(
+            "{} has been edited by hand since Alexandria adopted it. "
+            "Choose it again in Preferences to replace it.".format(
+                os.path.basename(path)))
 
     text, written, skipped = render(conn)
 

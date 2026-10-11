@@ -198,6 +198,111 @@ def test_turning_it_on_does_not_look_like_everything_changed(
     assert win.syncs == 0, "the 30 changes from before are not news"
 
 
+# ---- when the timer exists at all -----------------------------------
+
+class _Timers:
+    """Stands in for GLib's timeout sources."""
+
+    def __init__(self):
+        self.live = set()
+        self._next = 0
+
+    def timeout_add_seconds(self, _secs, _fn):
+        self._next += 1
+        self.live.add(self._next)
+        return self._next
+
+    def source_remove(self, source_id):
+        self.live.discard(source_id)
+
+
+@pytest.fixture
+def timers(monkeypatch):
+    t = _Timers()
+    monkeypatch.setattr(browse.GLib, "timeout_add_seconds",
+                        t.timeout_add_seconds)
+    monkeypatch.setattr(browse.GLib, "source_remove", t.source_remove)
+    return t
+
+
+class _Timed(_Win):
+    _bib_live_start_timer = browse.BrowserWindow._bib_live_start_timer
+    _bib_live_stop_timer = browse.BrowserWindow._bib_live_stop_timer
+
+    def __init__(self, serial=0):
+        super().__init__(serial)
+        self._bib_live_timer_id = None
+
+
+def test_no_timer_until_a_file_is_chosen(timers, serial):
+    """An application nobody has pointed at a `.bib` should not wake
+    up every two seconds for the life of the window."""
+    win = _Timed()
+
+    assert timers.live == set()
+
+
+def test_adopting_a_file_starts_it(timers, serial):
+    win = _Timed()
+
+    win._bib_live_start_timer()
+
+    assert len(timers.live) == 1
+
+
+def test_starting_twice_leaves_one_timer(timers, serial):
+    """Preferences can be opened again and the same file re-chosen."""
+    win = _Timed()
+
+    win._bib_live_start_timer()
+    win._bib_live_start_timer()
+    win._bib_live_start_timer()
+
+    assert len(timers.live) == 1
+
+
+def test_turning_it_off_stops_it(timers, serial):
+    win = _Timed()
+    win._bib_live_start_timer()
+
+    win._bib_live_stop_timer()
+
+    assert timers.live == set()
+    assert win._bib_live_timer_id is None
+
+
+def test_it_can_be_turned_on_again(timers, serial):
+    win = _Timed()
+    win._bib_live_start_timer()
+    win._bib_live_stop_timer()
+
+    win._bib_live_start_timer()
+
+    assert len(timers.live) == 1
+
+
+def test_stopping_when_it_was_never_started_is_harmless(timers, serial):
+    """The window's shutdown path calls this unconditionally."""
+    win = _Timed()
+
+    win._bib_live_stop_timer()
+
+    assert timers.live == set()
+
+
+def test_starting_does_not_make_the_backlog_look_new(timers, serial):
+    """Turning the feature on adopts the serial as it stands, so the
+    changes from before are not mistaken for news — Preferences asks
+    for that first write itself."""
+    serial(42)
+    win = _Timed(serial=0)
+
+    win._bib_live_start_timer()
+
+    assert win._bib_live_serial == 42
+    assert win._bib_live_seen == 42
+
+
 def test_the_tick_stays_scheduled(enabled, serial):
     """Every path returns True, or the timer stops and the feature
     quietly dies."""

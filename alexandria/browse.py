@@ -2313,8 +2313,9 @@ class BrowserWindow(Adw.ApplicationWindow):
         self._bib_live_seen = index.CHANGE_SERIAL
         self._bib_live_busy = False
         self._bib_live_last_error = None
-        self._bib_live_timer_id = GLib.timeout_add_seconds(
-            2, self._bib_live_tick)
+        self._bib_live_timer_id = None
+        if bibtex_live.get_path():
+            self._bib_live_start_timer()
 
         # GFileMonitor-based library watcher: react to external file
         # changes in LIBRARY_ROOT (drops via Files / cp / sync tools,
@@ -3244,20 +3245,52 @@ class BrowserWindow(Adw.ApplicationWindow):
         self._start_bib_live_sync()
         return True
 
-    def _start_bib_live_sync(self):
+    def _bib_live_start_timer(self):
+        """Begin polling for library changes, if not already.
+
+        The timer exists only while the feature is on: an application
+        that nobody has pointed at a `.bib` should not wake up every
+        two seconds for the life of the window to find out that it
+        still has nothing to do."""
+        if getattr(self, "_bib_live_timer_id", None):
+            return
+        self._bib_live_serial = index.CHANGE_SERIAL
+        self._bib_live_seen = index.CHANGE_SERIAL
+        self._bib_live_timer_id = GLib.timeout_add_seconds(
+            2, self._bib_live_tick)
+
+    def _bib_live_stop_timer(self):
+        if getattr(self, "_bib_live_timer_id", None):
+            try:
+                GLib.source_remove(self._bib_live_timer_id)
+            except Exception:
+                pass
+            self._bib_live_timer_id = None
+
+    def _start_bib_live_sync(self, allow_foreign=False):
         """Render and write the live `.bib` on a worker thread. Reads
-        every sidecar in the library, so not on the GTK thread."""
+        every sidecar in the library, so not on the GTK thread.
+
+        `allow_foreign` carries the yes the Preferences dialog has
+        just taken to overwriting a hand-written file; see
+        `bibtex_live.sync`."""
         self._bib_live_busy = True
         threading.Thread(target=self._do_bib_live_sync,
+                         args=(allow_foreign,),
                          daemon=True).start()
 
-    def _do_bib_live_sync(self):
+    def _do_bib_live_sync(self, allow_foreign=False):
         # Own connection: sqlite3 objects belong to the thread that
         # made them, same as the refreshers above.
         conn = None
         try:
             conn = index.connect_existing(self._db_path)
-            result = bibtex_live.sync(conn)
+            result = bibtex_live.sync(conn, allow_foreign=allow_foreign)
+        except bibtex_live.Foreign as e:
+            # Not a failure: a decision deferred to the user. Its
+            # message is written to be read, so it is passed through
+            # whole rather than wrapped in "failed".
+            GLib.idle_add(self._on_bib_live_refused, str(e))
         except Exception as e:
             GLib.idle_add(self._on_bib_live_failed,
                           "{}{}".format(e, _sqlite_err_info(e)))
@@ -3276,6 +3309,17 @@ class BrowserWindow(Adw.ApplicationWindow):
                 written, path,
                 " ({} skipped — sidecar missing)".format(skipped)
                 if skipped else ""))
+        return False
+
+    def _on_bib_live_refused(self, message):
+        self._bib_live_busy = False
+        _wlog("bibtex-live", "refused: " + message)
+        # Deduped the same way a failure is: every library change
+        # will reach this again until the user re-adopts the file or
+        # turns the feature off.
+        if message != self._bib_live_last_error:
+            self._bib_live_last_error = message
+            self._toast(message, timeout=8)
         return False
 
     def _on_bib_live_failed(self, message):
@@ -5184,9 +5228,7 @@ class BrowserWindow(Adw.ApplicationWindow):
         except Exception:
             pass
         try:
-            if self._bib_live_timer_id:
-                GLib.source_remove(self._bib_live_timer_id)
-                self._bib_live_timer_id = None
+            self._bib_live_stop_timer()
         except Exception:
             pass
         try:
@@ -6560,11 +6602,17 @@ class BrowserWindow(Adw.ApplicationWindow):
             bibtex_live.set_path(path)
             _show_bib_path()
             bib_clear_btn.set_visible(True)
+            self._bib_live_start_timer()
             # Write it now rather than at the next import: the point
             # of choosing the file is to have a usable bibliography,
             # and an empty one until the next paper arrives would look
             # like the setting had not taken.
-            self._start_bib_live_sync()
+            #
+            # `allow_foreign`: getting here past the dialog below is
+            # the user saying yes to replacing whatever is in the
+            # file, and this is the write they said yes to. Every
+            # later one finds our own header and needs no permission.
+            self._start_bib_live_sync(allow_foreign=True)
 
         def _on_bib_file_chosen(fd, result):
             try:
@@ -6632,6 +6680,9 @@ class BrowserWindow(Adw.ApplicationWindow):
             bibtex_live.set_path("")
             _show_bib_path()
             bib_clear_btn.set_visible(False)
+            self._bib_live_stop_timer()
+            # So a complaint about the old file does not outlive it.
+            self._bib_live_last_error = None
 
         bib_choose_btn.connect("clicked", _on_choose_bib)
         bib_clear_btn.connect("clicked", _on_clear_bib)

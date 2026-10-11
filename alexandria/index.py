@@ -27,7 +27,18 @@ XDG_STATE = os.environ.get("XDG_STATE_HOME") or os.path.join(
 # route a paper takes into the library — import, BibTeX import, the
 # watcher noticing a sidecar another copy of Alexandria wrote, the
 # edit dialog, enrichment — ends in `upsert` or `remove`, so bumping
-# here catches all of them without each caller remembering to.
+# here catches all of them without each caller remembering to. The
+# six `UPDATE papers` statements that do not go through `upsert` are
+# the two schema migrations, the highlight-text backfill, the sidecar
+# path migration, `mark_pdb_indexed` and `update_citations`, none of
+# which change a field BibTeX exports.
+#
+# In-process is the limit of it, though: a write from another process
+# — the MCP server, `alexandria-import`, a second window — moves no
+# integer here. What covers that is the file watcher, which sees the
+# new sidecar and re-upserts in *this* process, and so bumps the
+# serial a moment later. The reach of this counter is the reach of
+# `watcher.py`, not of the database.
 #
 # Incremented from worker threads and read from the GTK main thread.
 # No lock: `+= 1` on a module global is not atomic in principle, but
