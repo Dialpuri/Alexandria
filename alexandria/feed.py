@@ -497,6 +497,19 @@ def refresh_subscription(conn, subscription, limit=FEED_FETCH_ROWS):
         # kinds these rows need no enrichment at all.
         from . import biorxiv
         articles = biorxiv.fetch_subject(query)[:limit]
+    elif kind == "arxiv_category":
+        # One category per subscription, for the same reason as the
+        # bioRxiv subjects: there is no usable search, so the category
+        # *is* the query. The feed carries the whole abstract, so
+        # these rows need no enrichment either.
+        #
+        # `fetch_category` has already dropped the `replace` and
+        # `replace-cross` announcements, which are papers the feed has
+        # shown before and are often half of it. An empty result is
+        # not a fault: arXiv announces on weekdays only and says so in
+        # the channel, so at a weekend this is the correct answer.
+        from . import arxiv
+        articles = arxiv.fetch_category(query)[:limit]
     elif kind == "retraction_watch":
         # One fixed feed, so `query` is unused. These rows are
         # reporting rather than papers: no DOI, nothing to enrich,
@@ -518,11 +531,13 @@ def refresh_subscription(conn, subscription, limit=FEED_FETCH_ROWS):
         doi = a.get("doi")
         if not doi:
             continue
-        if kind == "biorxiv_subject":
+        if kind in ("biorxiv_subject", "arxiv_category"):
             # The feed already said everything Unpaywall could:
             # a preprint is readable, and pdf_fetch constructs the
             # PDF URL from the DOI. Thirty lookups per refresh to
-            # learn that would be rude and slow.
+            # learn that would be rude and slow — and for a category
+            # like cs.LG, which announces 472 papers at a time, it
+            # would be hundreds.
             continue
         try:
             unpw = metrics.fetch_oa_locations(doi)

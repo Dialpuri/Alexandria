@@ -314,17 +314,28 @@ they are shared across catalogues, as are any photographs you attach.
 
 ### Keeping up
 
-**Subscriptions** follow a journal, a saved OpenAlex search, or
-bioRxiv subject collections, and collect what is new into a feed
-refreshed in the background.
+**Subscriptions** follow a journal, a saved OpenAlex search, bioRxiv
+subject collections or arXiv categories, and collect what is new into
+a feed refreshed in the background.
 
-bioRxiv has no search, so its subscriptions are whole subjects: tick
-as many of the 27 collections as you read and each gets its own feed,
-with a preprint listed under two subjects appearing under both. The
-rows arrive complete — title, authors, abstract, DOI and date come
-straight from the feed, with no further lookups. To search preprints
-by term instead, use **Discover → Preprints**, which asks Europe
-PMC.
+Neither preprint server offers a search worth relying on, so their
+subscriptions are whole sections. For bioRxiv, tick as many of the 27
+collections as you read; for arXiv, as many of the 155 categories,
+grouped by archive. Each gets its own feed, and a paper listed under
+two sections appears under both — a cross-listing is information, not
+a duplicate. The rows arrive complete: title, authors, abstract, DOI
+and date come straight from the feed, with no further lookups.
+
+arXiv announces once each weekday and the feed carries one cycle, so
+nothing arrives at a weekend. Revised versions of papers already
+announced are left out, since they are papers you have been shown
+already — without that, half of a typical category is re-runs.
+Categories differ enormously in size, from a handful of papers a day
+in `q-bio.BM` to several hundred in `cs.LG`, so the feed keeps them in
+separate groups rather than one merged list.
+
+To search preprints by term instead, use **Discover → Preprints**,
+which asks Europe PMC.
 
 ## Notes
 - [1] poppler `https://poppler.freedesktop.org/`

@@ -27,7 +27,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk, Pango
 
-from . import (biorxiv, feed, feed_images, index, opener,
+from . import (arxiv, biorxiv, feed, feed_images, index, opener,
                retractionwatch)
 from .markup import safe_pango_markup
 
@@ -50,6 +50,11 @@ _KIND_GLYPH = {
     "openalex_query": "[T]",
     "crossref_query": "[T]",
     "biorxiv_subject": "[P]",
+    # arXiv shares bioRxiv's glyph rather than taking one of its own:
+    # what the mark distinguishes is a preprint standing order from a
+    # journal or a topic, and which server it came from is already in
+    # the subscription's name.
+    "arxiv_category": "[P]",
     "retraction_watch": "[R]",
 }
 
@@ -126,6 +131,18 @@ def _clear_box(box):
         nxt = child.get_next_sibling()
         box.remove(child)
         child = nxt
+
+
+def _expander_label(text, count):
+    """An archive's name with how many categories are inside it.
+
+    The count is there because the expanders are closed: "Physics"
+    alone does not say whether opening it costs a glance or a scroll,
+    and Physics holds 51 of the 155."""
+    lab = Gtk.Label(xalign=0.0)
+    lab.set_markup("{} <span alpha='55%'>({})</span>".format(
+        safe_pango_markup(text), count))
+    return lab
 
 
 class FeedWindow(Adw.Window):
@@ -237,10 +254,20 @@ class FeedWindow(Adw.Window):
             "toggled", self._on_add_mode_toggled, "journal")
         self._add_topic_btn.connect(
             "toggled", self._on_add_mode_toggled, "topic")
-        self._add_preprint_btn = Gtk.ToggleButton(label="Preprints")
+        self._add_preprint_btn = Gtk.ToggleButton(label="bioRxiv")
         self._add_preprint_btn.set_group(self._add_journal_btn)
         self._add_preprint_btn.connect(
             "toggled", self._on_add_mode_toggled, "preprint")
+        # arXiv gets its own mode rather than joining the bioRxiv
+        # picker: 155 categories against 27 subjects, grouped by
+        # archive instead of one flat list, and the servers name
+        # different things — a bioRxiv "subject" is a collection
+        # chosen by the author, an arXiv category is a classification
+        # a paper can hold several of at once.
+        self._add_arxiv_btn = Gtk.ToggleButton(label="arXiv")
+        self._add_arxiv_btn.set_group(self._add_journal_btn)
+        self._add_arxiv_btn.connect(
+            "toggled", self._on_add_mode_toggled, "arxiv")
         # Retraction Watch is one fixed feed, so this mode has no
         # entry and no picker — just the button that follows it.
         self._add_rw_btn = Gtk.ToggleButton(label="Retractions")
@@ -250,6 +277,7 @@ class FeedWindow(Adw.Window):
         mode_row.append(self._add_journal_btn)
         mode_row.append(self._add_topic_btn)
         mode_row.append(self._add_preprint_btn)
+        mode_row.append(self._add_arxiv_btn)
         mode_row.append(self._add_rw_btn)
         b.append(mode_row)
 
@@ -290,6 +318,50 @@ class FeedWindow(Adw.Window):
         self._subject_scroller.set_child(grid)
         self._subject_scroller.set_visible(False)
         b.append(self._subject_scroller)
+
+        # arXiv's 155 categories, grouped by archive. A flat list of
+        # that length is not a list anybody reads, and the archives
+        # are how arXiv itself presents them — so one expander each,
+        # with Quantitative Biology and Physics open to start,
+        # because that is where this project's readers live. Nothing
+        # is left out: widening past biology is the point of having
+        # arXiv at all.
+        #
+        # `Gtk.Expander` rather than `Adw.ExpanderRow`: this popover
+        # is plain GTK throughout (FlowBox, CheckButton, ToggleButton)
+        # and an Adw row wants a ListBox or PreferencesGroup around it
+        # to look right.
+        self._arxiv_checks = {}
+        arxiv_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
+                            spacing=2)
+        for group_slug, group_label, cats in arxiv.CATEGORIES:
+            exp = Gtk.Expander()
+            exp.set_label_widget(_expander_label(
+                group_label, len(cats)))
+            inner = Gtk.FlowBox()
+            inner.set_selection_mode(Gtk.SelectionMode.NONE)
+            inner.set_max_children_per_line(2)
+            inner.set_row_spacing(2)
+            inner.set_column_spacing(12)
+            inner.set_margin_start(16)
+            inner.set_margin_bottom(4)
+            for slug, label in cats:
+                # The slug is on the button as well as the label:
+                # `cs.LG` is what arXiv's own pages, listings and
+                # cross-list lines call it, and it is what someone
+                # arriving with a category in mind is looking for.
+                t = Gtk.CheckButton(label="{}  {}".format(slug, label))
+                self._arxiv_checks[slug] = t
+                inner.append(t)
+            exp.set_child(inner)
+            exp.set_expanded(group_slug in arxiv.DEFAULT_OPEN)
+            arxiv_box.append(exp)
+        self._arxiv_scroller = Gtk.ScrolledWindow()
+        self._arxiv_scroller.set_min_content_height(260)
+        self._arxiv_scroller.set_min_content_width(460)
+        self._arxiv_scroller.set_child(arxiv_box)
+        self._arxiv_scroller.set_visible(False)
+        b.append(self._arxiv_scroller)
 
         # Below the subject grid, not above it: you choose the
         # subjects and then act on them. The other two modes hide the
@@ -355,6 +427,16 @@ class FeedWindow(Adw.Window):
                 "retractionwatch.com. These are articles about papers, "
                 "not papers, so they are read rather than "
                 "imported.</span>")
+        elif mode == "arxiv":
+            self._add_action_btn.set_label("Follow selected categories")
+            self._add_status.set_markup(
+                "<span size='small' alpha='65%'>arXiv announces once "
+                "each weekday, and each category keeps its own feed. "
+                "Revised versions are left out — they are papers you "
+                "have already been shown — but cross-listings are "
+                "kept. Categories vary hugely in size: q-bio.BM "
+                "announces a handful a day, cs.LG several "
+                "hundred.</span>")
         else:
             self._add_action_btn.set_label("Follow selected subjects")
             self._add_status.set_markup(
@@ -362,18 +444,24 @@ class FeedWindow(Adw.Window):
                 "so you follow whole subject collections. Each keeps "
                 "its own feed; a preprint listed under two subjects "
                 "appears in both.</span>")
-        # The entry is for the two query modes; preprints choose from
-        # a fixed list, because a misspelt subject answers 200 with no
-        # items and would look like a quiet week for ever, and
-        # Retraction Watch is a single feed with nothing to type.
-        self._add_entry.set_visible(mode not in ("preprint", "retraction"))
+        # The entry is for the two query modes; the preprint servers
+        # choose from a fixed list, because a misspelt subject or
+        # category answers 200 with no items and would look like a
+        # quiet week for ever, and Retraction Watch is a single feed
+        # with nothing to type.
+        self._add_entry.set_visible(
+            mode not in ("preprint", "arxiv", "retraction"))
         self._subject_scroller.set_visible(mode == "preprint")
+        self._arxiv_scroller.set_visible(mode == "arxiv")
         self._add_results_scroller.set_visible(mode == "journal")
         _clear_box(self._add_results)
 
     def _on_add_query(self, _w):
         if self._add_mode == "preprint":
             self._do_add_subjects()
+            return
+        if self._add_mode == "arxiv":
+            self._do_add_arxiv_categories()
             return
         if self._add_mode == "retraction":
             self._do_add_retraction_watch()
@@ -557,6 +645,59 @@ class FeedWindow(Adw.Window):
             "<span size='small'>Following {} subject{}. Fetching "
             "first batch…</span>".format(
                 len(added), "" if len(added) == 1 else "s"))
+        self._refresh_subscriptions_strip()
+        for sid in added:
+            threading.Thread(target=self._initial_fetch,
+                             args=(sid,), daemon=True).start()
+        self._add_sub_button.get_popover().popdown()
+
+    def _do_add_arxiv_categories(self):
+        """Follow every ticked arXiv category.
+
+        The bioRxiv path's shape, deliberately: N subscriptions from
+        one gesture, already-followed categories skipped rather than
+        refused, and one row per category so that `discovered`'s
+        UNIQUE(subscription_id, doi) gives per-category dedupe and a
+        cross-listed paper lands in each category it was announced
+        in."""
+        chosen = [slug for slug, btn in self._arxiv_checks.items()
+                  if btn.get_active()]
+        if not chosen:
+            self._add_status.set_markup(
+                "<span size='small' foreground='#cc3333'>"
+                "Tick at least one category.</span>")
+            return
+        existing = {s["query"] for s in index.list_subscriptions(self.conn)
+                    if s["kind"] == "arxiv_category"}
+        added = []
+        for slug in chosen:
+            if slug in existing:
+                continue
+            try:
+                sid = index.add_subscription(
+                    self.conn, "arxiv_category",
+                    arxiv.subscription_name(slug), slug)
+            except Exception as e:
+                self._add_status.set_markup(
+                    "<span size='small' foreground='#cc3333'>"
+                    "Could not add {}: {}</span>".format(
+                        GLib.markup_escape_text(slug),
+                        GLib.markup_escape_text(str(e))))
+                return
+            added.append(sid)
+            self._arxiv_checks[slug].set_active(False)
+        if not added:
+            self._add_status.set_markup(
+                "<span size='small' alpha='75%'>Already following "
+                "those.</span>")
+            return
+        # "weekday" rather than "soon": at a weekend the first fetch
+        # returns an empty feed, correctly, and silence after
+        # "Fetching first batch" would read as a failure.
+        self._add_status.set_markup(
+            "<span size='small'>Following {} categor{}. The next "
+            "arXiv announcement is on a weekday.</span>".format(
+                len(added), "y" if len(added) == 1 else "ies"))
         self._refresh_subscriptions_strip()
         for sid in added:
             threading.Thread(target=self._initial_fetch,

@@ -1599,14 +1599,16 @@ def list_subscriptions(conn):
 def add_subscription(conn, kind, name, query, fetch_interval_hours=None):
     """Create a new subscription. `kind` is one of
     'journal_issn' | 'openalex_query' | 'crossref_query' |
-    'biorxiv_subject' | 'retraction_watch'.
+    'biorxiv_subject' | 'arxiv_category' | 'retraction_watch'.
     `query` is kind-specific: comma-separated ISSNs for
-    'journal_issn', a bioRxiv subject slug for 'biorxiv_subject',
+    'journal_issn', a bioRxiv subject slug for 'biorxiv_subject', an
+    arXiv category such as 'q-bio.BM' for 'arxiv_category',
     unused for 'retraction_watch' (there is one feed, so there is
     nothing to parameterise), the raw search string otherwise.
     Returns the new row id."""
     if kind not in ("journal_issn", "openalex_query", "crossref_query",
-                    "biorxiv_subject", "retraction_watch"):
+                    "biorxiv_subject", "arxiv_category",
+                    "retraction_watch"):
         raise ValueError("unknown subscription kind: " + repr(kind))
     cur = conn.execute(
         "INSERT INTO subscriptions"

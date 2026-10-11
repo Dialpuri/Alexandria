@@ -2876,6 +2876,17 @@ stops working the moment it is false.
   at least distrust an ORCID record whose `works_count` is in single
   figures.
 
+- **DONE 2026-10-11** — `alexandria/arxiv.py` plus an
+  `arxiv_category` subscription kind and an archive-grouped picker in
+  the feed window's add panel. Two corrections to the entry below,
+  both found while building it: `arxiv:announce_type` has a fourth
+  value, `replace-cross`, which arXiv's own specification uses as its
+  example and which an `== "replace"` filter would let through; and
+  the taxonomy is 155 categories across 8 archives, taken from
+  `arxiv.org/category_taxonomy` rather than from memory. What is
+  *not* done is the catch-up route for a missed announcement, which
+  stays below. Original entry:
+
 - **arXiv: there is no interface to it worth the name.** Noted
   2026-10-09 on the other machine, filed 2026-10-11; measuring agrees
   with the complaint.
