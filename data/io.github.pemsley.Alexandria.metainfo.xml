@@ -11,9 +11,9 @@
 
   <description>
     <p>
-      Alexandria is a library for managing scientific papers.
+      Alexandria is a application for managing a local store of scientific papers.
       Typically starting with a directory of PDFs, it extracts metadata (title,
-      authors, year, DOI, journal) from the page text, CrossRef and
+      authors, year, DOI, journal) from the text of the PDF, consults CrossRef and
       OpenAlex, then presents a searchable, filterable card browser.
       Alexandria tries to make it easy to find and add related papers.
     </p>

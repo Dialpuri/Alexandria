@@ -1510,15 +1510,40 @@ class AuthorPage(Gtk.Box):
         carries citations of earlier work. Measured across real trail
         rows — Murshudov 1989 (36 entries), Dialpuri 2022 (5),
         Sheldrick 1934 (60) — which also puts paid to the claim that
-        the series is capped at ten years."""
+        the series is capped at ten years.
+
+        This is an *optional* cache write called from the middle of
+        `_apply_results`. An exception here aborted the rest of that
+        method — histogram, affiliations, the whole profile pane —
+        so a failed cache write presented to the user as "the Author
+        window didn't open". Nothing below it depends on the result,
+        so it must never raise.
+
+        Its own connection rather than `self.conn`, matching every
+        other write in this file (the GtR funding cache does the
+        same): the GUI connection is shared with background threads,
+        and Apple's libsqlite3 is unforgiving about concurrent use
+        of a single connection — see `index.connect_existing`."""
         years = [r.get("year") for r in (counts_by_year or [])
                  if r.get("works_count") and r.get("year")]
         if not years:
             return
         key = index.author_trail_key(self.authorship)
-        if key:
-            index.set_author_first_publication_year(
-                self.conn, key, min(years))
+        if not key:
+            return
+        conn = None
+        try:
+            conn = index.connect_existing(index.db_path_of(self.conn))
+            index.set_author_first_publication_year(conn, key, min(years))
+        except Exception as e:
+            print("[author_works] first-publication-year cache write "
+                  "failed:", e)
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
     def _empty_status_markup(self):
         """Pick the right "nothing to show" message. When OpenAlex is
