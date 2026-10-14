@@ -2066,6 +2066,8 @@ class BrowserWindow(Adw.ApplicationWindow):
         import_section.append("Import Files…",   "win.import-files")
         import_section.append("Import Folder…",  "win.import-folder")
         import_section.append("Import BibTeX…",  "win.import-bibtex")
+        import_section.append("Import BibTeX from Clipboard",
+                              "win.import-bibtex-clipboard")
         import_section.append("Import from DOI or PubMed ID…",
                               "win.import-doi")
         import_menu.append_section(None, import_section)
@@ -2977,6 +2979,8 @@ class BrowserWindow(Adw.ApplicationWindow):
             ("import-files",  self._on_import_files),
             ("import-folder", self._on_import_folder),
             ("import-bibtex", self._on_import_bibtex),
+            ("import-bibtex-clipboard",
+             self._on_import_bibtex_clipboard),
             ("import-doi",    self._on_import_doi),
             ("export-bibtex", self._on_export_bibtex),
             ("export-ris",    self._on_export_ris),
@@ -3103,6 +3107,38 @@ class BrowserWindow(Adw.ApplicationWindow):
             return
         self._start_import_bib(path)
 
+    # --- BibTeX import from the clipboard -----------------------------
+
+    def _on_import_bibtex_clipboard(self, _btn):
+        """Import whatever BibTeX is on the clipboard. No dialog: the
+        user has already chosen the entries by copying them, and a
+        file chooser in the middle would be asking a question they
+        just answered. Publishers' "cite this" buttons and Google
+        Scholar both hand over BibTeX this way."""
+        if self._import_busy:
+            self.status.set_text("Import already running")
+            return
+        self.get_clipboard().read_text_async(
+            None, self._on_clipboard_bibtex_read)
+
+    def _on_clipboard_bibtex_read(self, clipboard, result):
+        try:
+            text = clipboard.read_text_finish(result)
+        except GLib.Error as e:
+            self._toast("Couldn't read the clipboard: {}".format(e.message))
+            return
+        if not bibtex_import.looks_like_bibtex(text):
+            # Distinguish "nothing was copied" from "what was copied
+            # isn't BibTeX": the fix is different in each case. GTK
+            # hands back None for an empty clipboard and for one
+            # holding something that isn't text at all — both are the
+            # first case from here.
+            self._toast("No BibTeX on the clipboard"
+                        if (text or "").strip()
+                        else "Nothing on the clipboard to import")
+            return
+        self._start_import_bib_text(text)
+
     def _start_import_bib(self, bib_path):
         self._show_progress(
             "Reading {}...".format(os.path.basename(bib_path)), 0.0)
@@ -3110,17 +3146,38 @@ class BrowserWindow(Adw.ApplicationWindow):
         threading.Thread(target=self._do_import_bib,
                          args=(bib_path,), daemon=True).start()
 
-    def _do_import_bib(self, bib_path):
+    def _start_import_bib_text(self, text):
+        self._show_progress("Reading the clipboard...", 0.0)
+        self._import_busy = True
+        threading.Thread(target=self._do_import_bib_text,
+                         args=(text,), daemon=True).start()
+
+    def _bib_import_progress(self):
+        """The `on_progress` callback both BibTeX import paths use —
+        it marshals back onto the GTK thread."""
         def progress(i, n, key, status):
             frac = (i / n) if n else 0.0
             label = "{}/{}  {}  ({})".format(i, n, key or "?", status)
             GLib.idle_add(self._show_progress, label, frac)
+        return progress
 
+    def _do_import_bib(self, bib_path):
         try:
             counts = bibtex_import.import_bib(
-                self.conn, bib_path, self.library_root, on_progress=progress)
+                self.conn, bib_path, self.library_root,
+                on_progress=self._bib_import_progress())
         except Exception as e:
             print("BibTeX import failed:", e)
+            counts = None
+        GLib.idle_add(self._do_import_bib_done, counts)
+
+    def _do_import_bib_text(self, text):
+        try:
+            counts = bibtex_import.import_bib_text(
+                self.conn, text, self.library_root,
+                on_progress=self._bib_import_progress())
+        except Exception as e:
+            print("BibTeX clipboard import failed:", e)
             counts = None
         GLib.idle_add(self._do_import_bib_done, counts)
 
@@ -3129,6 +3186,11 @@ class BrowserWindow(Adw.ApplicationWindow):
         self._hide_progress()
         if counts is None:
             self._toast("BibTeX import failed (see terminal)", timeout=6)
+        elif not any(counts[k] for k in
+                     ("imported", "ghost", "duplicate", "error")):
+            # Four zeroes read as a successful import of nothing.
+            # Say what actually happened instead.
+            self._toast("No BibTeX entries found", timeout=5)
         else:
             msg = "BibTeX: {} imported, {} ghost, {} duplicate, {} errors".format(
                 counts["imported"], counts["ghost"],

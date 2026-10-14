@@ -448,14 +448,42 @@ def attach_pdf_to_ghost(conn, ghost_row, source_pdf_path, library_root):
         "Attached PDF to «{}»".format(bibtex_key)
 
 
+# An `@article{`, `@book(`, ... opener. Enough to tell BibTeX from
+# whatever else was on the clipboard, and cheap enough to run before
+# committing to a parse.
+_ENTRY_OPENER_RE = re.compile(r"@\s*[A-Za-z]+\s*[{(]")
+
+
+def looks_like_bibtex(text):
+    """True when `text` plausibly contains at least one BibTeX entry.
+
+    Used by the clipboard import to tell "nothing useful was copied"
+    from "this is a `.bib` that failed to parse" — two different
+    things to say to the user. It also keeps `import_bib_text` from
+    handing a stray filename to `bibtex.parse`, which would read that
+    file from disk."""
+    return bool(text) and bool(_ENTRY_OPENER_RE.search(text))
+
+
 def import_bib(conn, bib_path, library_root, on_progress=None):
     """Parse a `.bib` file and import every entry. Returns a counts
     dict: `{imported, ghost, duplicate, error, renamed}`, where
     `renamed` is a list of `(was, now)` citation-key pairs for
     entries whose key the file used more than once. `on_progress(i,
     n, key, status)` is called once per entry if supplied."""
+    with open(bib_path, "r", encoding="utf-8") as f:
+        text = f.read()
+    return import_bib_text(conn, text, library_root,
+                           on_progress=on_progress)
+
+
+def import_bib_text(conn, text, library_root, on_progress=None):
+    """Import every entry in a BibTeX *string* — the clipboard paste
+    path. Same counts dict and same `on_progress` contract as
+    `import_bib`; a string with no entries in it is not an error, it
+    just imports nothing."""
     from . import bibtex
-    records = bibtex.parse(bib_path)
+    records = bibtex.parse(text)
     n = len(records)
     counts = {"imported": 0, "ghost": 0, "duplicate": 0, "error": 0,
               # Entries whose citation key had to change because the

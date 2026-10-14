@@ -245,6 +245,13 @@ the metadata looked up from the DOI. There is no import dialog to go
 through. The hamburger menu also offers **Import from DOI or PubMed
 ID…**, **Import BibTeX…**, **Import Files…** and **Import Folder…**.
 
+**Import ▸ Import BibTeX from Clipboard** takes whatever BibTeX you
+have just copied — from a journal's "cite this" button, Google
+Scholar, or someone's email — without saving it to a file first.
+There is no dialog: copy the entries, pick the menu item, and they
+are imported. Anything else on the clipboard is left alone and said
+so.
+
 A BibTeX import makes a card for every entry, including the ones with
 no PDF. Those are *ghost* cards: press **Get PDF** and Alexandria
 tries OpenAlex, Unpaywall and EuropePMC in turn, and on success merges
